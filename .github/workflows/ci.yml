@@ -1,0 +1,48 @@
+# The demo repo's whole gate: definitions lint clean, membership tree builds.
+#
+# "Deployed = merged" (ADR 0005) only means something if merge implies green —
+# protect `main` requiring the `definitions` check. The linter is not vendored:
+# the platform repo is checked out alongside and `dsl-lint` runs from its `dsl/`
+# package, so this repo can never drift from the DSL contract it is validated
+# against.
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  definitions:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # The platform repo, for the linter (dsl/) — same contract the sites run.
+      # damhau/appfactory is private, so the default GITHUB_TOKEN cannot read
+      # it: APPFACTORY_READ_TOKEN is a fine-grained PAT with Contents: read on
+      # that one repo (repo secret).
+      - uses: actions/checkout@v4
+        with:
+          repository: damhau/appfactory
+          path: .appfactory
+          token: ${{ secrets.APPFACTORY_READ_TOKEN }}
+
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Lint definitions
+        run: uv run --project .appfactory dsl-lint --format github apps/
+
+      # The same build ArgoCD runs (definitions ApplicationSet): every membership
+      # reference must resolve. Stock kustomize, default load restrictor —
+      # membership lines are directory bases (../../apps/<name>), so no flags
+      # here and no kustomize.buildOptions in any argocd-cm.
+      - name: Membership tree builds
+        run: |
+          for site in deploy/*/; do
+            echo "--- $site"
+            kustomize build "$site" > /dev/null
+          done

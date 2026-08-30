@@ -1,0 +1,13 @@
+# The demo's one site (ADR 0005 fences the demo away from real-fleet concerns).
+# Single-site demo on apps.dhconsulting.ch; the cluster is the same one the
+# reused ArgoCD instance runs on, hence the in-cluster server URL.
+#
+# This file exists twice by design: bootstrap/preflight read it from this
+# checkout, while the studio reads the copy in the definitions repo
+# (appfactory-demo). Keep both copies identical.
+trigram: NAI
+region: demo
+connectivityClass: good
+canary: false
+cluster: nai-demo # kube context alias — created at bring-up over the demo cluster's context
+server: https://kubernetes.default.svc
