@@ -4,7 +4,7 @@ spec:
     title:
       en: Vehicle Inventory
       fr: Inventaire des véhicules
-    version: 2
+    version: 3
     description:
       en: Register of fleet vehicles with assignment, workshop status and service
         dates
@@ -62,6 +62,14 @@ spec:
         op: eq
         field: _state
         value: in_workshop
+      metric: count
+    - title:
+        en: Awaiting decommission approval
+        fr: Réformes en attente d'approbation
+      filter:
+        op: eq
+        field: _state
+        value: pending_decommission
       metric: count
     - title:
         en: Decommissioned
@@ -134,6 +142,44 @@ spec:
         field: _state
         value: in_workshop
       metric: count
+    - label:
+        en: Awaiting approval
+        fr: En attente d'approbation
+      filter:
+        op: eq
+        field: _state
+        value: pending_decommission
+      metric: count
+    collection: vehicles
+  - name: decommission_approvals
+    sort:
+    - by: decommission_requested_on
+      dir: asc
+    type: table
+    label:
+      en: Decommission approvals
+      fr: Approbations de réforme
+    roles:
+    - fleet_officer
+    - workshop_supervisor
+    - app_admin
+    filter:
+      op: eq
+      field: _state
+      value: pending_decommission
+    columns:
+    - plate_number
+    - vehicle_type
+    - base_location
+    - odometer_km
+    - decommission_reason
+    - decommission_requested_by
+    - decommission_requested_on
+    summary:
+    - label:
+        en: Awaiting approval
+        fr: En attente d'approbation
+      metric: count
     collection: vehicles
   - name: workshop_board
     type: board
@@ -182,6 +228,15 @@ spec:
       - next_service_due
       - insurance_expiry
     - title:
+        en: Decommission
+        fr: Réforme
+      fields:
+      - decommission_reason
+      - decommission_requested_by
+      - decommission_requested_on
+      - decommission_approved_by
+      - decommission_approved_on
+    - title:
         en: Attachments and notes
         fr: Pièces jointes et notes
       fields:
@@ -205,6 +260,11 @@ spec:
       label:
         en: In workshop
         fr: En atelier
+    - name: pending_decommission
+      color: danger
+      label:
+        en: Pending decommission approval
+        fr: Réforme en attente d'approbation
     - name: decommissioned
       color: neutral
       label:
@@ -266,17 +326,73 @@ spec:
       effects:
       - value: '{{today}}'
         setField: last_service_date
-    - to: decommissioned
+    - to: pending_decommission
       from:
       - available
       - assigned
       - in_workshop
-      name: decommission
+      name: request_decommission
+      guard:
+        op: isNotEmpty
+        field: decommission_reason
       label:
-        en: Decommission
-        fr: Réformer
+        en: Request decommission
+        fr: Demander la réforme
+      roles:
+      - fleet_officer
+      - workshop_supervisor
+      - app_admin
+      effects:
+      - value: '{{currentUser}}'
+        setField: decommission_requested_by
+      - value: '{{today}}'
+        setField: decommission_requested_on
+      - notify:
+          roles:
+          - app_admin
+          message:
+            en: A vehicle decommission request is awaiting your approval
+            fr: Une demande de réforme de véhicule attend votre approbation
+      requireComment: true
+    - to: decommissioned
+      from: pending_decommission
+      name: approve_decommission
+      label:
+        en: Approve decommission
+        fr: Approuver la réforme
       roles:
       - app_admin
+      effects:
+      - value: '{{currentUser}}'
+        setField: decommission_approved_by
+      - value: '{{today}}'
+        setField: decommission_approved_on
+      - notify:
+          roles:
+          - fleet_officer
+          - workshop_supervisor
+          message:
+            en: A vehicle decommission request has been approved
+            fr: Une demande de réforme de véhicule a été approuvée
+      requireComment: true
+    - to: available
+      from: pending_decommission
+      name: reject_decommission
+      label:
+        en: Reject decommission
+        fr: Refuser la réforme
+      roles:
+      - app_admin
+      effects:
+      - notify:
+          roles:
+          - fleet_officer
+          - workshop_supervisor
+          message:
+            en: A vehicle decommission request was rejected; the vehicle returns to
+              available and may need reassigning
+            fr: Une demande de réforme a été refusée ; le véhicule redevient disponible
+              et peut nécessiter une réaffectation
       requireComment: true
   collections:
   - name: vehicles
@@ -295,8 +411,20 @@ spec:
       - app_admin
       update:
         app_admin: all
-        fleet_officer: all
-        workshop_supervisor: all
+        fleet_officer:
+          scope: all
+          states:
+          - available
+          - assigned
+          - in_workshop
+          - pending_decommission
+        workshop_supervisor:
+          scope: all
+          states:
+          - available
+          - assigned
+          - in_workshop
+          - pending_decommission
     fields:
     - name: plate_number
       type: text
@@ -420,6 +548,81 @@ spec:
       label:
         en: Insurance expiry
         fr: Expiration de l'assurance
+    - help:
+        en: Required before a decommission request can be submitted
+        fr: Obligatoire avant de soumettre une demande de réforme
+      name: decommission_reason
+      type: select
+      label:
+        en: Decommission reason
+        fr: Motif de réforme
+      options:
+      - label:
+          en: End of service life
+          fr: Fin de vie utile
+        value: end_of_life
+      - label:
+          en: Accident damage
+          fr: Dommages accidentels
+        value: accident_damage
+      - label:
+          en: Repair uneconomic
+          fr: Réparation non rentable
+        value: uneconomic_repair
+      - label:
+          en: Sold or transferred
+          fr: Vendu ou transféré
+        value: sold_or_transferred
+      - label:
+          en: Theft or total loss
+          fr: Vol ou perte totale
+        value: theft_or_loss
+      - label:
+          en: Other
+          fr: Autre
+        value: other
+    - help:
+        en: Set automatically when the request is submitted
+        fr: Renseigné automatiquement lors de la demande
+      name: decommission_requested_by
+      type: user
+      label:
+        en: Decommission requested by
+        fr: Réforme demandée par
+      readOnlyFor:
+      - fleet_officer
+      - workshop_supervisor
+      - app_admin
+    - name: decommission_requested_on
+      type: date
+      label:
+        en: Requested on
+        fr: Demandé le
+      readOnlyFor:
+      - fleet_officer
+      - workshop_supervisor
+      - app_admin
+    - help:
+        en: Set automatically when an administrator approves
+        fr: Renseigné automatiquement lors de l'approbation
+      name: decommission_approved_by
+      type: user
+      label:
+        en: Approved by
+        fr: Approuvé par
+      readOnlyFor:
+      - fleet_officer
+      - workshop_supervisor
+      - app_admin
+    - name: decommission_approved_on
+      type: date
+      label:
+        en: Approved on
+        fr: Approuvé le
+      readOnlyFor:
+      - fleet_officer
+      - workshop_supervisor
+      - app_admin
     - name: notes
       type: richtext
       label:
