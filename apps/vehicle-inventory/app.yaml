@@ -1,0 +1,445 @@
+kind: App
+spec:
+  info:
+    title:
+      en: Vehicle Inventory
+      fr: Inventaire des véhicules
+    version: 2
+    description:
+      en: Register of fleet vehicles with assignment, workshop status and service
+        dates
+      fr: Registre des véhicules du parc avec affectation, statut d'atelier et dates
+        d'entretien
+    minRendererVersion: 0.1.0
+  roles:
+  - name: fleet_officer
+    label:
+      en: Fleet Officer
+      fr: Responsable de parc
+  - name: workshop_supervisor
+    label:
+      en: Workshop Supervisor
+      fr: Chef d'atelier
+  - name: app_admin
+    label:
+      en: Administrator
+      fr: Administrateur
+  views:
+  - name: fleet_overview
+    type: dashboard
+    label:
+      en: Fleet overview
+      fr: Vue d'ensemble du parc
+    roles:
+    - fleet_officer
+    - workshop_supervisor
+    - app_admin
+    widgets:
+    - title:
+        en: Total vehicles
+        fr: Total des véhicules
+      metric: count
+    - title:
+        en: Available
+        fr: Disponibles
+      filter:
+        op: eq
+        field: _state
+        value: available
+      metric: count
+    - title:
+        en: Assigned
+        fr: Affectés
+      filter:
+        op: eq
+        field: _state
+        value: assigned
+      metric: count
+    - title:
+        en: In workshop
+        fr: En atelier
+      filter:
+        op: eq
+        field: _state
+        value: in_workshop
+      metric: count
+    - title:
+        en: Decommissioned
+        fr: Réformés
+      filter:
+        op: eq
+        field: _state
+        value: decommissioned
+      metric: count
+    - title:
+        en: Average odometer (km)
+        fr: Compteur moyen (km)
+      metric: avg(odometer_km)
+    - chart: bar
+      title:
+        en: By status
+        fr: Par statut
+      metric: count
+      groupBy: _state
+    - chart: pie
+      title:
+        en: By vehicle type
+        fr: Par type de véhicule
+      metric: count
+      groupBy: vehicle_type
+    - chart: bar
+      title:
+        en: By base location
+        fr: Par lieu de rattachement
+      metric: count
+      groupBy: base_location
+    - chart: pie
+      title:
+        en: Fuel mix
+        fr: Répartition des carburants
+      metric: count
+      groupBy: fuel_type
+    collection: vehicles
+  - name: fleet_register
+    sort:
+    - by: plate_number
+    type: table
+    label:
+      en: Fleet register
+      fr: Registre du parc
+    roles:
+    - fleet_officer
+    - workshop_supervisor
+    - app_admin
+    columns:
+    - plate_number
+    - vehicle_type
+    - make
+    - model
+    - base_location
+    - assigned_to
+    - next_service_due
+    - _state
+    default: true
+    summary:
+    - label:
+        en: Total vehicles
+        fr: Total des véhicules
+      metric: count
+    - label:
+        en: In workshop
+        fr: En atelier
+      filter:
+        op: eq
+        field: _state
+        value: in_workshop
+      metric: count
+    collection: vehicles
+  - name: workshop_board
+    type: board
+    label:
+      en: Status board
+      fr: Tableau des statuts
+    roles:
+    - fleet_officer
+    - workshop_supervisor
+    - app_admin
+    groupBy: _state
+    collection: vehicles
+  - name: vehicle_detail
+    type: detail
+    label:
+      en: Vehicle
+      fr: Véhicule
+    roles:
+    - fleet_officer
+    - workshop_supervisor
+    - app_admin
+    sections:
+    - title:
+        en: Identification
+        fr: Identification
+      fields:
+      - plate_number
+      - vehicle_type
+      - make
+      - model
+      - year
+      - chassis_number
+      - fuel_type
+    - title:
+        en: Assignment
+        fr: Affectation
+      fields:
+      - base_location
+      - assigned_to
+      - odometer_km
+    - title:
+        en: Servicing
+        fr: Entretien
+      fields:
+      - last_service_date
+      - next_service_due
+      - insurance_expiry
+    - title:
+        en: Attachments and notes
+        fr: Pièces jointes et notes
+      fields:
+      - photos
+      - notes
+    collection: vehicles
+  workflows:
+  - states:
+    - name: available
+      color: success
+      label:
+        en: Available
+        fr: Disponible
+    - name: assigned
+      color: info
+      label:
+        en: Assigned
+        fr: Affecté
+    - name: in_workshop
+      color: warning
+      label:
+        en: In workshop
+        fr: En atelier
+    - name: decommissioned
+      color: neutral
+      label:
+        en: Decommissioned
+        fr: Réformé
+      terminal: true
+    initial: available
+    collection: vehicles
+    transitions:
+    - to: assigned
+      from: available
+      name: assign
+      guard:
+        op: isNotEmpty
+        field: assigned_to
+      label:
+        en: Assign
+        fr: Affecter
+      roles:
+      - fleet_officer
+      - app_admin
+    - to: available
+      from: assigned
+      name: release
+      label:
+        en: Release
+        fr: Libérer
+      roles:
+      - fleet_officer
+      - app_admin
+    - to: in_workshop
+      from:
+      - available
+      - assigned
+      name: send_to_workshop
+      label:
+        en: Send to workshop
+        fr: Envoyer à l'atelier
+      roles:
+      - fleet_officer
+      - workshop_supervisor
+      - app_admin
+      effects:
+      - notify:
+          roles:
+          - workshop_supervisor
+          message:
+            en: A vehicle has been sent to the workshop
+            fr: Un véhicule a été envoyé à l'atelier
+    - to: available
+      from: in_workshop
+      name: return_to_service
+      label:
+        en: Return to service
+        fr: Remettre en service
+      roles:
+      - workshop_supervisor
+      - app_admin
+      effects:
+      - value: '{{today}}'
+        setField: last_service_date
+    - to: decommissioned
+      from:
+      - available
+      - assigned
+      - in_workshop
+      name: decommission
+      label:
+        en: Decommission
+        fr: Réformer
+      roles:
+      - app_admin
+      requireComment: true
+  collections:
+  - name: vehicles
+    label:
+      en: Vehicle
+      fr: Véhicule
+    access:
+      read:
+        app_admin: all
+        fleet_officer: all
+        workshop_supervisor: all
+      create:
+      - fleet_officer
+      - app_admin
+      delete:
+      - app_admin
+      update:
+        app_admin: all
+        fleet_officer: all
+        workshop_supervisor: all
+    fields:
+    - name: plate_number
+      type: text
+      label:
+        en: Plate number
+        fr: Immatriculation
+      display: mono
+      required: true
+      validation:
+        maxLength: 20
+        minLength: 2
+    - name: vehicle_type
+      type: select
+      label:
+        en: Type
+        fr: Type
+      options:
+      - label:
+          en: Light vehicle
+          fr: Véhicule léger
+        value: light_vehicle
+      - label:
+          en: 4x4
+          fr: 4x4
+        value: four_wheel_drive
+      - label:
+          en: Truck
+          fr: Camion
+        value: truck
+      - label:
+          en: Minibus
+          fr: Minibus
+        value: minibus
+      - label:
+          en: Motorcycle
+          fr: Moto
+        value: motorcycle
+      - label:
+          en: Ambulance
+          fr: Ambulance
+        value: ambulance
+      required: true
+    - name: make
+      type: text
+      label:
+        en: Make
+        fr: Marque
+      required: true
+    - name: model
+      type: text
+      label:
+        en: Model
+        fr: Modèle
+    - name: year
+      type: number
+      label:
+        en: Year
+        fr: Année
+      validation:
+        max: 2100
+        min: 1980
+    - name: chassis_number
+      type: text
+      label:
+        en: Chassis number (VIN)
+        fr: Numéro de châssis (VIN)
+      display: mono
+      validation:
+        maxLength: 32
+    - name: fuel_type
+      type: select
+      label:
+        en: Fuel
+        fr: Carburant
+      options:
+      - label:
+          en: Diesel
+          fr: Diesel
+        value: diesel
+      - label:
+          en: Petrol
+          fr: Essence
+        value: petrol
+      - label:
+          en: Hybrid
+          fr: Hybride
+        value: hybrid
+      - label:
+          en: Electric
+          fr: Électrique
+        value: electric
+    - name: base_location
+      type: text
+      label:
+        en: Base location
+        fr: Lieu de rattachement
+    - name: assigned_to
+      type: user
+      label:
+        en: Assigned to
+        fr: Affecté à
+    - name: odometer_km
+      type: number
+      label:
+        en: Odometer (km)
+        fr: Compteur (km)
+      validation:
+        min: 0
+    - name: last_service_date
+      type: date
+      label:
+        en: Last service
+        fr: Dernier entretien
+    - name: next_service_due
+      type: date
+      label:
+        en: Next service due
+        fr: Prochain entretien
+    - name: insurance_expiry
+      type: date
+      label:
+        en: Insurance expiry
+        fr: Expiration de l'assurance
+    - name: notes
+      type: richtext
+      label:
+        en: Notes
+        fr: Notes
+    - name: photos
+      type: attachment
+      label:
+        en: Photos and documents
+        fr: Photos et documents
+      multiple: true
+      validation:
+        maxSizeMb: 10
+    titleField: plate_number
+    labelPlural:
+      en: Vehicles
+      fr: Véhicules
+metadata:
+  name: vehicle-inventory
+apiVersion: appfactory.icrc.org/v1
+deployment:
+  sites:
+  - NAI
